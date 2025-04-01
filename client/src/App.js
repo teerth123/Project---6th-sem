@@ -11,19 +11,18 @@ import Profile from './pages/Profile';
 import Connect from './pages/Connect';
 import SearchUser from './pages/SearchUser';
 import Conversations from './pages/Conversations';
-import Conversation from './pages/Conversation';
+import ConversationPage from './pages/Conversation';
 import ConnectionRequests from './pages/ConnectionRequests';
 import UserProfile from './pages/UserProfile';
 import ProtectedRoute from './components/ProtectedRoute';
 
-// Navigation component with connection request notifications
+// Navigation with notification badge for connection requests
 const Navigation = () => {
   const { currentUser, logout } = useContext(AuthContext);
   const [pendingCount, setPendingCount] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Only fetch pending connections if user is logged in
     if (currentUser) {
       fetchPendingConnections();
     }
@@ -32,9 +31,9 @@ const Navigation = () => {
   const fetchPendingConnections = async () => {
     try {
       const res = await axios.get('/api/users/connections');
-      setPendingCount(res.data.pendingConnections.length);
+      setPendingCount(res.data?.pendingConnections?.length || 0);
     } catch (err) {
-      console.error('Error fetching pending connections:', err);
+      console.error('Error fetching pending connections:', err.message);
     }
   };
 
@@ -54,24 +53,15 @@ const Navigation = () => {
               </Link>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-              <Link
-                to="/"
-                className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-              >
+              <Link to="/" className="text-gray-500 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
                 Home
               </Link>
               {currentUser && (
                 <>
-                  <Link
-                    to="/conversations"
-                    className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                  >
+                  <Link to="/conversations" className="text-gray-500 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
                     Messages
                   </Link>
-                  <Link
-                    to="/search-user"
-                    className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                  >
+                  <Link to="/search-user" className="text-gray-500 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
                     Find Users
                   </Link>
                 </>
@@ -79,52 +69,39 @@ const Navigation = () => {
             </div>
           </div>
           <div className="hidden sm:ml-6 sm:flex sm:items-center">
-            <div className="ml-3 relative">
-              <div className="flex space-x-4">
-                {currentUser ? (
-                  <>
-                    <Link
-                      to="/connection-requests"
-                      className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium relative"
-                    >
-                      Connections
-                      {pendingCount > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                          {pendingCount}
-                        </span>
-                      )}
-                    </Link>
-                    <Link
-                      to="/profile"
-                      className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Profile
-                    </Link>
-                    <button
-                      onClick={handleLogout}
-                      className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Logout
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <Link
-                      to="/login"
-                      className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Login
-                    </Link>
-                    <Link
-                      to="/register"
-                      className="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 rounded-md text-sm font-medium"
-                    >
-                      Sign Up
-                    </Link>
-                  </>
-                )}
-              </div>
-            </div>
+            {currentUser ? (
+              <>
+                <Link
+                  to="/connection-requests"
+                  className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium relative"
+                >
+                  Connections
+                  {pendingCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                      {pendingCount}
+                    </span>
+                  )}
+                </Link>
+                <Link to="/profile" className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium">
+                  Profile
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium">
+                  Login
+                </Link>
+                <Link to="/register" className="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 rounded-md text-sm font-medium">
+                  Sign Up
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -139,67 +116,66 @@ function App() {
         <Router>
           <div className="min-h-screen bg-gray-100">
             <Navigation />
-
             <div className="py-4">
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
-                <Route 
-                  path="/profile" 
+                <Route
+                  path="/profile"
                   element={
                     <ProtectedRoute>
                       <Profile />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/user/:userId" 
+                <Route
+                  path="/user/:userId"
                   element={
                     <ProtectedRoute>
                       <UserProfile />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/connect" 
+                <Route
+                  path="/connect"
                   element={
                     <ProtectedRoute>
                       <Connect />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/search-user" 
+                <Route
+                  path="/search-user"
                   element={
                     <ProtectedRoute>
                       <SearchUser />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/connection-requests" 
+                <Route
+                  path="/connection-requests"
                   element={
                     <ProtectedRoute>
                       <ConnectionRequests />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/conversations" 
+                <Route
+                  path="/conversations"
                   element={
                     <ProtectedRoute>
                       <Conversations />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/conversations/:conversationId" 
+                <Route
+                  path="/conversations/:conversationId"
                   element={
                     <ProtectedRoute>
-                      <Conversation />
+                      <ConversationPage />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
               </Routes>
             </div>
@@ -210,4 +186,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;

@@ -1,3 +1,4 @@
+// --- index.js ---
 import express from 'express';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
@@ -6,11 +7,31 @@ import http from 'http';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
+import uploadRoutes from './routes/uploadRoutes.js';
 import initializeSocket from './socket.js';
+import { v2 as cloudinary } from 'cloudinary';
+import multer from 'multer';
 
-// Load environment variables
 dotenv.config();
 
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME || "",
+  api_key: process.env.CLOUD_API_KEY ||  "",
+  api_secret: process.env.CLOUD_API_SECRET || "",
+});
+
+// Multer configuration for handling file uploads
+const storage = multer.diskStorage({
+  filename: function (req, file, cb) {
+    // Generate a unique filename
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const fileExtension = file.originalname.split('.').pop();
+    cb(null, file.fieldname + '-' + uniqueSuffix + '.' + fileExtension);
+  },
+});
+
+const upload = multer({ storage: storage });
 // Initialize express app
 const app = express();
 
@@ -36,6 +57,7 @@ mongoose.connect(process.env.MONGODB_URI)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/conversations', conversationRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -45,9 +67,14 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
+app.get('/', (req, res) => {
+  res.json({
+    msg: "hi"
+  });
+})
 
 // Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});

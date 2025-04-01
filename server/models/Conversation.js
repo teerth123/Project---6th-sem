@@ -1,3 +1,4 @@
+// --- /models/Conversation.js ---
 import mongoose from 'mongoose';
 
 const ConversationSchema = new mongoose.Schema(
@@ -34,4 +35,4 @@ ConversationSchema.index({ "participants.0": 1, "participants.1": 1 }, { unique:
 
 const Conversation = mongoose.model('Conversation', ConversationSchema);
 
-export default Conversation; 
+export default Conversation;

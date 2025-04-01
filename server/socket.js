@@ -74,6 +74,7 @@ const initializeSocket = (server) => {
           createdAt: new Date()
         });
         
+        console.log(`Received message from ${socket.user.username} in conversation ${conversationId}: ${text}`)
       } catch (err) {
         console.error('Error sending message:', err);
         socket.emit('error', { message: 'Failed to send message' });

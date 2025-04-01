@@ -1,3 +1,4 @@
+// --- /models/Message.js ---
 import mongoose from 'mongoose';
 
 const MessageSchema = new mongoose.Schema(
@@ -14,7 +15,16 @@ const MessageSchema = new mongoose.Schema(
     },
     text: {
       type: String,
-      required: true
+      default: '' //text is no longer required
+    },
+    type: {
+      type: String,
+      enum: ['text', 'image', 'video', 'document'],
+      default: 'text'
+    },
+    fileUrl: {
+      type: String,
+      default: undefined // Make fileUrl optional
     },
     read: {
       type: Boolean,
@@ -26,4 +36,4 @@ const MessageSchema = new mongoose.Schema(
 
 const Message = mongoose.model('Message', MessageSchema);
 
-export default Message; 
+export default Message;

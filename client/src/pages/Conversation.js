@@ -8,10 +8,10 @@ import VideoCall from '../components/VideoCall';
 const Conversation = () => {
   const { conversationId } = useParams();
   const { currentUser } = useContext(AuthContext);
-  const { 
-    socket, 
-    joinConversation, 
-    leaveConversation, 
+  const {
+    socket,
+    joinConversation,
+    leaveConversation,
     sendMessage: socketSendMessage,
     sendTypingStatus,
     isUserOnline,
@@ -20,10 +20,11 @@ const Conversation = () => {
     clearIncomingCall
   } = useContext(SocketContext);
   const navigate = useNavigate();
-  
+
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -33,6 +34,7 @@ const Conversation = () => {
   const [pendingUserId, setPendingUserId] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Fetch conversation and messages
   useEffect(() => {
@@ -40,9 +42,9 @@ const Conversation = () => {
       try {
         // Check if conversationId is a MongoDB ObjectId or a user ID
         const isObjectId = /^[0-9a-fA-F]{24}$/.test(conversationId);
-        
+
         let conversationData;
-        
+
         if (isObjectId) {
           // Try to get existing conversation
           try {
@@ -53,16 +55,16 @@ const Conversation = () => {
             // If that fails, it might be a user ID, so try to start a conversation
             if (err.response?.status === 404) {
               const startRes = await axios.post(`/api/conversations/start/${conversationId}`);
-              
+
               // If we got a conversation object back, use it
               if (startRes.data._id) {
                 conversationData = startRes.data;
-              } 
+              }
               // If we got a request/pending status, show appropriate message and redirect after delay
               else if (startRes.data.isRequested || startRes.data.isPending) {
                 const message = startRes.data.message || 'Cannot start conversation yet';
                 setError(message);
-                
+
                 // If connection request is pending from the other user, provide option to accept
                 if (startRes.data.isPending && startRes.data.pendingUserId) {
                   // Set state to show accept button
@@ -74,7 +76,7 @@ const Conversation = () => {
                     navigate('/conversations');
                   }, 3000);
                 }
-                
+
                 setLoading(false);
                 return;
               }
@@ -87,19 +89,19 @@ const Conversation = () => {
           setLoading(false);
           return;
         }
-        
+
         setConversation(conversationData);
-        
+
         // Get messages for the conversation
         const messagesRes = await axios.get(`/api/conversations/${conversationData._id}/messages`);
         setMessages(messagesRes.data);
-        
+
         setLoading(false);
       } catch (err) {
         console.error('Error fetching conversation:', err);
         setError('Failed to load conversation');
         setLoading(false);
-        
+
         // Navigate back to conversations list after showing error
         setTimeout(() => {
           navigate('/conversations');
@@ -115,12 +117,12 @@ const Conversation = () => {
     if (socket && conversation?._id) {
       // Join the conversation room
       joinConversation(conversation._id);
-      
+
       // Listen for new messages
       socket.on('newMessage', (message) => {
         setMessages(prev => [...prev, message]);
       });
-      
+
       // Listen for typing status
       socket.on('userTyping', ({ userId, username, isTyping }) => {
         if (isTyping) {
@@ -129,7 +131,7 @@ const Conversation = () => {
           setTypingUser(null);
         }
       });
-      
+
       // Clean up on unmount
       return () => {
         leaveConversation(conversation._id);
@@ -138,13 +140,13 @@ const Conversation = () => {
       };
     }
   }, [socket, conversation, joinConversation, leaveConversation]);
-  
+
   // Handle incoming calls
   useEffect(() => {
     // Check if the incoming call is for this conversation
     if (incomingCall && conversation) {
       const otherUser = getOtherParticipant();
-      
+
       // Only show call UI if it's from the user we're chatting with
       if (incomingCall.caller._id === otherUser?._id) {
         setActiveCall({
@@ -166,7 +168,7 @@ const Conversation = () => {
   // Get the other participant in the conversation
   const getOtherParticipant = () => {
     if (!conversation) return null;
-    
+
     return conversation.participants.find(
       p => p._id !== currentUser._id
     );
@@ -175,7 +177,7 @@ const Conversation = () => {
   // Format message timestamp
   const formatMessageTime = (timestamp) => {
     if (!timestamp) return '';
-    
+
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
@@ -185,46 +187,80 @@ const Conversation = () => {
     if (socket && conversation?._id) {
       // Send typing status
       sendTypingStatus(conversation._id, true);
-      
+
       // Clear previous timeout
       if (typingTimeout) {
         clearTimeout(typingTimeout);
       }
-      
+
       // Set new timeout to stop typing status after 2 seconds
       const timeout = setTimeout(() => {
         sendTypingStatus(conversation._id, false);
       }, 2000);
-      
+
       setTypingTimeout(timeout);
     }
   };
 
-  // Send a new message
+  // Handle file selection
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    setSelectedFile(file);
+  };
+
+  // Trigger file input click
+  const handleOpenFilePicker = () => {
+    fileInputRef.current.click();
+  };
+
+  // Send a new message (text or media)
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    
-    if (!newMessage.trim() || !conversation?._id) return;
-    
+
+    if (!newMessage.trim() && !selectedFile) return;
+
     setSending(true);
-    
+    setError('');
+
     try {
+      let messageData = { text: newMessage };
+      let fileUrl;
+      let fileType;
+
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        console.log('frontend here');
+
+        const uploadRes = await axios.post('/api/upload', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+
+        fileUrl = uploadRes.data.url;
+        fileType = uploadRes.data.type;
+        messageData = { ...messageData, fileUrl, type: fileType };
+      }
+
       // Send message via API
-      const res = await axios.post(`/api/conversations/${conversation._id}/messages`, {
-        text: newMessage
-      });
-      
+      const res = await axios.post(`/api/conversations/${conversation._id}/messages`, messageData);
+
       // Add the new message to the list
       setMessages([...messages, res.data]);
-      
+
       // Also send via socket for real-time
-      socketSendMessage(conversation._id, newMessage);
-      
+      socketSendMessage(conversation._id, newMessage, fileUrl, fileType);
+
       // Reset typing status
       sendTypingStatus(conversation._id, false);
-      
-      // Clear input
+
+      // Clear input and selected file
       setNewMessage('');
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Reset file input
+      }
       setSending(false);
     } catch (err) {
       console.error('Error sending message:', err);
@@ -236,16 +272,16 @@ const Conversation = () => {
   // Handle accepting connection request
   const handleAcceptConnection = async () => {
     if (!pendingUserId) return;
-    
+
     try {
       setLoading(true);
-      
+
       // Accept the connection request
       await axios.put(`/api/users/accept/${pendingUserId}`);
-      
+
       // Try to start the conversation again
       const startRes = await axios.post(`/api/conversations/start/${pendingUserId}`);
-      
+
       // If we got a conversation, redirect to it
       if (startRes.data._id) {
         navigate(`/conversations/${startRes.data._id}`);
@@ -261,55 +297,55 @@ const Conversation = () => {
       setLoading(false);
     }
   };
-  
+
   // Handle initiating video call
   const handleStartVideoCall = async () => {
     try {
       console.log('VIDEO CALL BUTTON CLICKED - START FUNCTION TRIGGERED');
       console.log('Starting video call...');
-      
+
       if (!conversation) {
         console.error('Cannot start call: No active conversation');
         setError('Cannot start call: No active conversation');
         return;
       }
-      
+
       const otherUser = getOtherParticipant();
       if (!otherUser) {
         console.error('Cannot start call: No other user found in this conversation');
         setError('Cannot start call: No recipient found');
         return;
       }
-      
+
       // Check if other user is online
       if (typeof isUserOnline === 'function' && !isUserOnline(otherUser._id)) {
         console.error('Cannot start call: User is offline');
         setError('Cannot start call: User is offline');
         return;
       }
-      
+
       console.log('Calling user:', otherUser.name, 'with ID:', otherUser._id);
       console.log('Using conversation ID:', conversation._id);
-      
+
       if (!conversation._id || !otherUser._id) {
-        console.error('Invalid IDs for call:', { 
-          conversationId: conversation?._id, 
-          recipientId: otherUser?._id 
+        console.error('Invalid IDs for call:', {
+          conversationId: conversation?._id,
+          recipientId: otherUser?._id
         });
         setError('Cannot start call: Invalid IDs');
         return;
       }
-      
+
       // Call the initiateVideoCall function from context
       console.log('Initiating video call with params:', {
         conversationId: conversation._id,
         recipientId: otherUser._id
       });
-      
+
       const callData = await initiateVideoCall(conversation._id, otherUser._id);
-      
+
       console.log('Call data received from API:', callData);
-      
+
       if (callData && callData.callId) {
         console.log('Setting up active call with ID:', callData.callId);
         setActiveCall({
@@ -329,7 +365,7 @@ const Conversation = () => {
       setError('Failed to start video call: ' + (err.response?.data?.message || err.message || 'Unknown error'));
     }
   };
-  
+
   // Handle ending video call
   const handleEndCall = () => {
     setActiveCall(null);
@@ -356,7 +392,7 @@ const Conversation = () => {
             <h2 className="text-xl font-semibold mt-2">Connection Request Pending</h2>
             <p className="text-gray-600 mt-1">{error}</p>
           </div>
-          
+
           <div className="flex flex-col space-y-3">
             <button
               onClick={handleAcceptConnection}
@@ -364,7 +400,7 @@ const Conversation = () => {
             >
               Accept Connection Request
             </button>
-            
+
             <button
               onClick={() => navigate('/conversations')}
               className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -393,7 +429,7 @@ const Conversation = () => {
           onEndCall={handleEndCall}
         />
       )}
-      
+
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center">
         <Link to="/conversations" className="mr-4 text-gray-500 hover:text-gray-700">
@@ -401,7 +437,7 @@ const Conversation = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
         </Link>
-        
+
         <Link to={`/user/${otherUser?._id}`} className="flex items-center flex-1">
           <div className="flex-shrink-0 h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center relative">
             <span className="text-indigo-800 font-medium text-sm">
@@ -411,111 +447,92 @@ const Conversation = () => {
               <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-white"></span>
             )}
           </div>
-          
+
           <div className="ml-3">
             <div className="text-sm font-medium text-gray-900">{otherUser?.name}</div>
-            <div className="text-xs text-gray-500">
-              @{otherUser?.username} · {isOnline ? 'Online' : 'Offline'}
-            </div>
+            <div className="text-xs text-gray-600">{isOnline ? 'Online' : 'Offline'}</div>
           </div>
         </Link>
-        
-        <div className="flex items-center">
-          <button
-            onClick={handleStartVideoCall}
-            className="mr-2 inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-full shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            disabled={!isOnline}
-            title={isOnline ? "Start video call" : "User is offline"}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            Video Call
-          </button>
-          
-          <Link 
-            to={`/user/${otherUser?._id}`}
-            className="text-xs text-indigo-600 hover:text-indigo-900"
-          >
-            Profile
-          </Link>
-        </div>
+
+        <button
+          onClick={handleStartVideoCall}
+          className="ml-auto bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          Start Video Call
+        </button>
       </div>
-      
+
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-            <span className="block sm:inline">{error}</span>
+      <div className="flex-1 overflow-y-auto p-4">
+        {messages.map((message) => (
+          <div key={message._id} className={`flex ${message.sender === currentUser._id ? 'justify-end' : 'justify-start'} mb-4`}>
+            <div className={`rounded-lg p-2 ${message.sender === currentUser._id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
+              {message.type === 'text' && <p>{message.text}</p>}
+              {message.type === 'image' && <img src={message.fileUrl} alt="Image" className="max-w-xs rounded-lg" />}
+              {message.type === 'video' && (
+                <video controls className="max-w-xs rounded-lg">
+                  <source src={message.fileUrl} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
+              )}
+              {message.type === 'audio' && (
+                <audio controls className="max-w-xs rounded-lg">
+                  <source src={message.fileUrl} type="audio/mpeg" />
+                  Your browser does not support the audio element.
+                </audio>
+              )}
+              {message.type === 'file' && (
+                <a href={message.fileUrl} download className="text-indigo-600 hover:underline">
+                  Download File
+                </a>
+              )}
+              <div className="text-xs text-gray-500 mt-1">{formatMessageTime(message.createdAt)}</div>
+            </div>
           </div>
-        )}
-        
-        {messages.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">No messages yet. Start the conversation!</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {messages.map((message) => {
-              const isCurrentUser = message.sender === currentUser._id;
-              
-              return (
-                <div
-                  key={message._id}
-                  className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-xs sm:max-w-md px-4 py-2 rounded-lg ${
-                      isCurrentUser
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-white text-gray-900 border border-gray-200'
-                    }`}
-                  >
-                    <p>{message.text}</p>
-                    <p
-                      className={`text-xs mt-1 text-right ${
-                        isCurrentUser ? 'text-indigo-200' : 'text-gray-500'
-                      }`}
-                    >
-                      {formatMessageTime(message.createdAt)}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-        
-        {typingUser && (
-          <div className="text-gray-500 text-sm mt-2 italic">
-            {typingUser} is typing...
-          </div>
-        )}
+        ))}
+        <div ref={messagesEndRef}></div>
       </div>
-      
+
       {/* Message Input */}
       <div className="bg-white border-t border-gray-200 px-4 py-3">
-        <form onSubmit={handleSendMessage} className="flex">
+        <form onSubmit={handleSendMessage} className="flex items-center space-x-3">
           <input
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            onKeyDown={handleTyping}
-            placeholder="Type a message..."
-            className="flex-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md"
+            onKeyPress={handleTyping}
+            placeholder="Type your message..."
+            className="flex-1 border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            type="button"
+            onClick={handleOpenFilePicker}
+            className="bg-gray-200 text-gray-600 px-4 py-2 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            Attach File
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
           />
           <button
             type="submit"
-            disabled={sending || !newMessage.trim()}
-            className="ml-3 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            disabled={sending}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            {sending ? 'Sending...' : 'Send'}
+            Send
           </button>
         </form>
+        {selectedFile && (
+          <div className="mt-2 text-sm text-gray-600">
+            Selected: {selectedFile.name}
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-export default Conversation; 
+export default Conversation;
