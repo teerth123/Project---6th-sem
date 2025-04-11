@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthContextProvider, AuthContext } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import { VideoTrackingProvider } from './context/VideoTrackingContext';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Home from './pages/Home';
@@ -14,6 +15,7 @@ import Conversations from './pages/Conversations';
 import ConversationPage from './pages/Conversation';
 import ConnectionRequests from './pages/ConnectionRequests';
 import UserProfile from './pages/UserProfile';
+import VideoAnalytics from './pages/VideoAnalytics';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Navigation with notification badge for connection requests
@@ -113,74 +115,84 @@ function App() {
   return (
     <AuthContextProvider>
       <SocketProvider>
-        <Router>
-          <div className="min-h-screen bg-gray-100">
-            <Navigation />
-            <div className="py-4">
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route
-                  path="/profile"
-                  element={
-                    <ProtectedRoute>
-                      <Profile />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/user/:userId"
-                  element={
-                    <ProtectedRoute>
-                      <UserProfile />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/connect"
-                  element={
-                    <ProtectedRoute>
-                      <Connect />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/search-user"
-                  element={
-                    <ProtectedRoute>
-                      <SearchUser />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/connection-requests"
-                  element={
-                    <ProtectedRoute>
-                      <ConnectionRequests />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/conversations"
-                  element={
-                    <ProtectedRoute>
-                      <Conversations />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/conversations/:conversationId"
-                  element={
-                    <ProtectedRoute>
-                      <ConversationPage />
-                    </ProtectedRoute>
-                  }
-                />
-              </Routes>
+        <VideoTrackingProvider>
+          <Router>
+            <div className="min-h-screen bg-gray-100">
+              <Navigation />
+              <div className="py-4">
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/register" element={<Register />} />
+                  <Route
+                    path="/profile"
+                    element={
+                      <ProtectedRoute>
+                        <Profile />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/user/:userId"
+                    element={
+                      <ProtectedRoute>
+                        <UserProfile />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/connect"
+                    element={
+                      <ProtectedRoute>
+                        <Connect />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/search-user"
+                    element={
+                      <ProtectedRoute>
+                        <SearchUser />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/connection-requests"
+                    element={
+                      <ProtectedRoute>
+                        <ConnectionRequests />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/conversations"
+                    element={
+                      <ProtectedRoute>
+                        <Conversations />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/conversations/:conversationId"
+                    element={
+                      <ProtectedRoute>
+                        <ConversationPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/video-analytics/:videoId"
+                    element={
+                      <ProtectedRoute>
+                        <VideoAnalytics />
+                      </ProtectedRoute>
+                    }
+                  />
+                </Routes>
+              </div>
             </div>
-          </div>
-        </Router>
+          </Router>
+        </VideoTrackingProvider>
       </SocketProvider>
     </AuthContextProvider>
   );

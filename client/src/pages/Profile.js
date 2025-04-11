@@ -8,6 +8,7 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [makeAdminLoading, setMakeAdminLoading] = useState(false);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -44,6 +45,40 @@ const Profile = () => {
       navigator.clipboard.writeText(currentUser.uniqueCode);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  // Quick function to toggle admin status (for testing only)
+  const toggleAdminStatus = async () => {
+    try {
+      setMakeAdminLoading(true);
+      
+      // Get the current user with updated fields
+      const updatedUser = {
+        ...profile,
+        isAdmin: !profile.isAdmin
+      };
+      
+      // Store in localStorage to update the client-side state
+      localStorage.setItem('user', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('user')),
+        isAdmin: !profile.isAdmin
+      }));
+      
+      // Update profile state
+      setProfile(updatedUser);
+      setMakeAdminLoading(false);
+      
+      // Since we don't have an API endpoint for this in the demo, just show a success message
+      alert(`You are now ${updatedUser.isAdmin ? 'an admin' : 'a regular user'}! (Frontend change only for demo)`);
+      
+      // Reload page to reflect changes from localStorage
+      window.location.reload();
+      
+    } catch (error) {
+      console.error('Error toggling admin status:', error);
+      setError('Failed to update admin status');
+      setMakeAdminLoading(false);
     }
   };
 
@@ -118,6 +153,28 @@ const Profile = () => {
                 </div>
                 <p className="mt-2 text-sm text-gray-500">
                   Share this code with friends so they can connect with you. Keep it private from people you don't want to chat with.
+                </p>
+              </dd>
+            </div>
+            
+            {/* Admin status toggle (for testing only) */}
+            <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+              <dt className="text-sm font-medium text-gray-500">Admin Status</dt>
+              <dd className="mt-1 text-sm sm:mt-0 sm:col-span-2">
+                <div className="flex items-center">
+                  <span className={`px-3 py-1 rounded-md ${userData.isAdmin ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                    {userData.isAdmin ? 'Admin' : 'Regular User'}
+                  </span>
+                  <button
+                    onClick={toggleAdminStatus}
+                    disabled={makeAdminLoading}
+                    className="ml-3 inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    {makeAdminLoading ? 'Updating...' : `Make ${userData.isAdmin ? 'Regular User' : 'Admin'}`}
+                  </button>
+                </div>
+                <p className="mt-2 text-sm text-gray-500">
+                  This is for demo purposes only - toggle admin status to access video analytics features
                 </p>
               </dd>
             </div>

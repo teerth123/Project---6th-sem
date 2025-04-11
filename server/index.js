@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import videoTrackingRoutes from './routes/videoTrackingRoutes.js';
 import initializeSocket from './socket.js';
 import { v2 as cloudinary } from 'cloudinary';
 import multer from 'multer';
@@ -16,9 +17,9 @@ dotenv.config();
 
 // Configure Cloudinary
 cloudinary.config({
-  cloud_name: process.env.CLOUD_NAME || "",
-  api_key: process.env.CLOUD_API_KEY ||  "",
-  api_secret: process.env.CLOUD_API_SECRET || "",
+  cloud_name: process.env.CLOUD_NAME || "deqnf0a9w",
+  api_key: process.env.CLOUD_API_KEY ||  "898792876773274",
+  api_secret: process.env.CLOUD_API_SECRET || "EIDrDnm5yaXfVO7SougS77OJmi4",
 });
 
 // Multer configuration for handling file uploads
@@ -58,6 +59,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/video-tracking', videoTrackingRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

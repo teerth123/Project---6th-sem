@@ -4,6 +4,7 @@ import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { SocketContext } from '../context/SocketContext';
 import VideoCall from '../components/VideoCall';
+import VideoMessage from '../components/VideoMessage';
 
 const Conversation = () => {
   const { conversationId } = useParams();
@@ -470,10 +471,10 @@ const Conversation = () => {
               {message.type === 'text' && <p>{message.text}</p>}
               {message.type === 'image' && <img src={message.fileUrl} alt="Image" className="max-w-xs rounded-lg" />}
               {message.type === 'video' && (
-                <video controls className="max-w-xs rounded-lg">
-                  <source src={message.fileUrl} type="video/mp4" />
-                  Your browser does not support the video tag.
-                </video>
+                <VideoMessage
+                  message={message}
+                  isMyMessage={message.sender === currentUser._id}
+                />
               )}
               {message.type === 'audio' && (
                 <audio controls className="max-w-xs rounded-lg">
