@@ -56,25 +56,75 @@ const initializeSocket = (server) => {
     // Handle new message
     socket.on('sendMessage', async (data) => {
       try {
-        const { conversationId, text } = data;
+        const { conversationId, text, fileUrl, type } = data;
         
-        if (!conversationId || !text) {
-          return socket.emit('error', { message: 'Conversation ID and message text are required' });
+        if (!conversationId) {
+          return socket.emit('error', { message: 'Conversation ID is required' });
         }
         
-        // Save message to database (this will be handled by the existing API endpoint)
-        // We'll just emit the message to the recipient here
-        
-        // Emit message to conversation participants
-        socket.to(conversationId).emit('newMessage', {
+        // Create message object with full details
+        const messageData = {
+          _id: new Date().getTime().toString(), // Temporary ID until saved in DB
           conversationId,
           sender: socket.user._id,
           senderName: socket.user.name,
-          text,
-          createdAt: new Date()
+          text: text || '',
+          type: type || 'text',
+          fileUrl: fileUrl || undefined,
+          createdAt: new Date(),
+          read: false
+        };
+        
+        console.log(`Received message from ${socket.user.username} in conversation ${conversationId}`);
+        
+        // Broadcast the message to all clients directly
+        console.log(`Directly broadcasting new message to ALL clients`);
+        io.emit('directNewMessage', {
+          ...messageData,
+          source: 'socket.js direct broadcast'
         });
         
-        console.log(`Received message from ${socket.user.username} in conversation ${conversationId}: ${text}`)
+        // Emit message to everyone in the conversation room (including sender for consistency)
+        console.log(`Broadcasting message to conversation room ${conversationId}`);
+        io.to(conversationId).emit('newMessage', messageData);
+        
+        // Get all sockets in the conversation room
+        const socketsInRoom = await io.in(conversationId).fetchSockets();
+        console.log(`Number of sockets in conversation room ${conversationId}: ${socketsInRoom.length}`);
+        
+        // Broadcast message update to all clients for real-time conversation list updates
+        console.log(`Broadcasting messageUpdate to all connected clients`);
+        io.emit('messageUpdate', {
+          conversationId,
+          lastMessage: text || `Sent ${type || 'file'}`,
+          lastMessageTime: new Date()
+        });
+        
+        // Also find all participants of the conversation in the DB to send direct notifications
+        try {
+          // Find conversation participants from DB
+          const conversation = await import('./models/Conversation.js');
+          const Conversation = conversation.default;
+          
+          const foundConversation = await Conversation.findById(conversationId);
+          if (foundConversation && foundConversation.participants) {
+            console.log(`Found conversation with ID ${conversationId}`);
+            
+            // Send direct notifications to all participants
+            foundConversation.participants.forEach(participantId => {
+              const participantSocketId = activeUsers.get(participantId.toString());
+              if (participantSocketId) {
+                console.log(`Sending direct notification to participant ${participantId}`);
+                io.to(participantSocketId).emit('directMessage', {
+                  ...messageData,
+                  source: 'socket.js direct message'
+                });
+              }
+            });
+          }
+        } catch (dbErr) {
+          console.error('Error finding conversation in DB:', dbErr);
+        }
       } catch (err) {
         console.error('Error sending message:', err);
         socket.emit('error', { message: 'Failed to send message' });
@@ -192,9 +242,38 @@ const initializeSocket = (server) => {
       socket.emit('callEnded', { callId });
     });
     
+    // Handle debug event
+    socket.on('debugEvent', (data) => {
+      console.log(`Debug event from user ${socket.user.username}:`, data);
+      // Echo back to confirm receipt
+      socket.emit('debugResponse', { 
+        received: true,
+        timestamp: new Date(),
+        message: 'Debug event received by server'
+      });
+    });
+    
+    // Handle any errors
+    socket.on('error', (error) => {
+      console.error(`Socket error for user ${socket.user.username}:`, error);
+    });
+    
+    // Set up a ping/pong to verify connection
+    const pingInterval = setInterval(() => {
+      if (socket.connected) {
+        console.log(`Sending ping to ${socket.user.username}`);
+        socket.emit('serverPing', { timestamp: new Date() });
+      }
+    }, 30000); // Every 30 seconds
+
+    socket.on('clientPong', (data) => {
+      console.log(`Received pong from ${socket.user.username}:`, data);
+    });
+    
     // Handle disconnect
     socket.on('disconnect', () => {
       console.log(`User disconnected: ${socket.user.username}`);
+      clearInterval(pingInterval);
       
       // Remove user from active users map
       activeUsers.delete(socket.user._id.toString());

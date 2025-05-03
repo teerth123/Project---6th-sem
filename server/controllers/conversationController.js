@@ -303,33 +303,63 @@ export const sendMessage = async (req, res) => {
     // Get Socket.IO instance
     const io = req.app.get('io');
 
-    // Emit message to conversation room
-    if (io) {
-      io.to(conversationId).emit('newMessage', {
-        _id: savedMessage._id,
-        conversationId,
-        sender: req.user._id,
-        senderName: req.user.name,
-        text: savedMessage.text,
-        type: savedMessage.type, // Include the type
-        fileUrl: savedMessage.fileUrl, // Include fileUrl
-        createdAt: savedMessage.createdAt,
-        read: false,
-      });
+    // Message data to emit
+    const messageData = {
+      _id: savedMessage._id,
+      conversationId,
+      sender: req.user._id,
+      senderName: req.user.name,
+      text: savedMessage.text,
+      type: savedMessage.type,
+      fileUrl: savedMessage.fileUrl,
+      createdAt: savedMessage.createdAt,
+      read: false,
+    };
 
-      // Also emit to the recipient's personal room in case they're not in the conversation room
-      io.to(otherParticipant.toString()).emit('messageNotification', {
-        conversationId,
-        message: {
-          _id: savedMessage._id,
-          sender: req.user._id,
-          senderName: req.user.name,
-          text: savedMessage.text,
-          type: savedMessage.type,
-          fileUrl: savedMessage.fileUrl,
-          createdAt: savedMessage.createdAt,
-        },
-      });
+    // Emit messages to all participants
+    if (io) {
+      console.log('Emitting real-time updates for new message');
+      
+      try {
+        // Emit to conversation room (for users who are currently in the chat)
+        console.log(`Broadcasting to conversation room: ${conversationId}`);
+        io.to(conversationId).emit('newMessage', messageData);
+        
+        // Broadcast directly to all sockets
+        console.log('Broadcasting message to all connected sockets');
+        io.emit('newMessage', {
+          ...messageData,
+          broadcastTimestamp: new Date()
+        });
+
+        // Emit to sender's personal room (to ensure they get it even if not in conversation room)
+        console.log(`Emitting to sender's personal room: ${req.user._id.toString()}`);
+        io.to(req.user._id.toString()).emit('newMessage', messageData);
+
+        // Emit to other participant's personal room (notification for when they're not in the conversation)
+        console.log(`Emitting notification to recipient: ${otherParticipant.toString()}`);
+        io.to(otherParticipant.toString()).emit('messageNotification', {
+          conversationId,
+          message: messageData,
+        });
+
+        // Also broadcast to all connected clients so they can update their lists
+        console.log('Broadcasting messageUpdate to all clients');
+        io.emit('messageUpdate', {
+          conversationId,
+          lastMessage: type === 'text' ? text : `Sent ${type}`,
+          lastMessageTime: new Date(),
+        });
+        
+        // Log connected clients for debug
+        const sockets = await io.fetchSockets();
+        console.log(`Number of connected sockets: ${sockets.length}`);
+        console.log('Connected socket IDs:', sockets.map(s => s.id).join(', '));
+      } catch (err) {
+        console.error('Error broadcasting message:', err);
+      }
+    } else {
+      console.log('Socket.IO instance not available, cannot emit real-time updates');
     }
 
     res.status(201).json(savedMessage);

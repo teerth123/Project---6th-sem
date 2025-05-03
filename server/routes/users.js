@@ -1,6 +1,6 @@
 import express from 'express';
 import User from '../models/User.js';
-import { protect } from '../middleware/auth.js';
+import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -27,67 +27,214 @@ router.get('/profile', protect, async (req, res) => {
   }
 });
 
-// Find user by unique code
-router.get('/find/:code', protect, async (req, res) => {
+// Special route to find a user by code for the search feature
+// Route needs to be before /:id to avoid conflict
+router.get('/find-by-code/:code', protect, async (req, res) => {
   try {
-    const user = await User.findOne({ uniqueCode: req.params.code }).select('_id username name roleDescription');
+    // Format code by removing spaces and hyphens
+    const code = req.params.code.toUpperCase().replace(/[\s-]/g, '');
+    const user = await User.findOne({ uniqueCode: code });
     
     if (!user) {
       return res.status(404).json({ message: 'User not found with this code' });
     }
     
-    res.status(200).json(user);
+    res.json({
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      uniqueCode: user.uniqueCode,
+      roleDescription: user.roleDescription,
+      userType: user.userType,
+      location: user.location,
+      typeOfService: user.typeOfService,
+      workExperience: user.workExperience,
+      yearsOfExperience: user.yearsOfExperience,
+      specializedSkills: user.specializedSkills,
+      shortBio: user.shortBio
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Check if current user has sent a connection request to another user
-router.get('/check-request/:userId', protect, async (req, res) => {
+// @desc    Get service providers
+// @route   GET /api/users/service-providers
+// @access  Public
+router.get('/service-providers', async (req, res) => {
   try {
-    const targetUser = await User.findById(req.params.userId);
+    const serviceProviders = await User.find({ 
+      userType: 'service_provider'
+    }).select('-password -isAdmin -pendingConnections -connections');
     
-    if (!targetUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Check if target user has a pending connection from current user
-    const isRequested = targetUser.pendingConnections.includes(req.user._id);
-    
-    res.status(200).json({ isRequested });
+    res.json(serviceProviders);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Request connection with another user
-router.post('/connect/:userId', protect, async (req, res) => {
+// @desc    Get user connections and pending connections
+// @route   GET /api/users/connections
+// @access  Private
+router.get('/connections', protect, async (req, res) => {
   try {
-    if (req.user._id.toString() === req.params.userId) {
-      return res.status(400).json({ message: 'You cannot connect with yourself' });
+    const user = await User.findById(req.user._id)
+      .populate('connections', '_id username name uniqueCode roleDescription')
+      .populate('pendingConnections', '_id username name uniqueCode roleDescription');
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
     }
     
-    const targetUser = await User.findById(req.params.userId);
+    res.json({
+      connections: user.connections,
+      pendingConnections: user.pendingConnections
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @desc    Search users by name or username
+// @route   GET /api/users/search
+// @access  Private
+router.get('/search', protect, async (req, res) => {
+  try {
+    const { query } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ message: 'Search query is required' });
+    }
+    
+    const users = await User.find({
+      $or: [
+        { name: { $regex: query, $options: 'i' } },
+        { username: { $regex: query, $options: 'i' } }
+      ],
+      _id: { $ne: req.user._id } // Exclude the current user
+    }).select('_id username name uniqueCode roleDescription userType location typeOfService');
+    
+    res.json(users);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @desc    Find user by unique code
+// @route   GET /api/users/code/:code
+// @access  Private
+router.get('/code/:code', protect, async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase().replace(/[\s-]/g, '');
+    const user = await User.findOne({ uniqueCode: code });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found with that code' });
+    }
+    
+    res.json({
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      uniqueCode: user.uniqueCode,
+      roleDescription: user.roleDescription
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @desc    Get user by ID
+// @route   GET /api/users/:id
+// @access  Private
+router.get('/:id', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    res.json({
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      uniqueCode: user.uniqueCode,
+      roleDescription: user.roleDescription,
+      userType: user.userType,
+      location: user.location,
+      typeOfService: user.typeOfService,
+      workExperience: user.workExperience,
+      yearsOfExperience: user.yearsOfExperience,
+      specializedSkills: user.specializedSkills,
+      shortBio: user.shortBio
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @desc    Send connection request
+// @route   POST /api/users/connect
+// @access  Private
+router.post('/connect', protect, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    // Check if valid ObjectId
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+    
+    // Cannot connect to yourself
+    if (userId === req.user._id.toString()) {
+      return res.status(400).json({ message: 'Cannot connect with yourself' });
+    }
+    
+    const targetUser = await User.findById(userId);
     if (!targetUser) {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    // Check if connection already exists
+    // Check if already connected
     if (targetUser.connections.includes(req.user._id)) {
-      return res.status(400).json({ message: 'You are already connected with this user' });
+      return res.status(400).json({ message: 'Already connected with this user' });
     }
     
-    // Check if connection is already pending
+    // Check if already in pending
     if (targetUser.pendingConnections.includes(req.user._id)) {
       return res.status(400).json({ message: 'Connection request already sent' });
     }
     
-    // Add current user to target user's pending connections
-    await User.findByIdAndUpdate(req.params.userId, {
-      $push: { pendingConnections: req.user._id }
-    });
+    // Check for reciprocal pending connection (user has already sent you a request)
+    const currentUser = await User.findById(req.user._id);
+    if (currentUser.pendingConnections.includes(userId)) {
+      // If the other user already sent a request, accept it instead
+      currentUser.pendingConnections = currentUser.pendingConnections.filter(
+        id => id.toString() !== userId
+      );
+      currentUser.connections.push(userId);
+      
+      targetUser.pendingConnections = targetUser.pendingConnections.filter(
+        id => id.toString() !== req.user._id.toString()
+      );
+      targetUser.connections.push(req.user._id);
+      
+      await currentUser.save();
+      await targetUser.save();
+      
+      return res.status(200).json({ message: 'Connection established' });
+    }
+    
+    // Send new connection request
+    targetUser.pendingConnections.push(req.user._id);
+    await targetUser.save();
     
     res.status(200).json({ message: 'Connection request sent' });
   } catch (err) {
@@ -96,48 +243,57 @@ router.post('/connect/:userId', protect, async (req, res) => {
   }
 });
 
-// Accept connection request
-router.put('/accept/:userId', protect, async (req, res) => {
+// @desc    Accept/Reject connection request
+// @route   PUT /api/users/connection-request
+// @access  Private
+router.put('/connection-request', protect, async (req, res) => {
   try {
-    const currentUser = await User.findById(req.user._id);
+    const { userId, action } = req.body;
     
-    // Check if request exists in pending connections
-    if (!currentUser.pendingConnections.includes(req.params.userId)) {
-      return res.status(400).json({ message: 'No pending connection request from this user' });
+    if (!['accept', 'reject'].includes(action)) {
+      return res.status(400).json({ message: 'Invalid action' });
     }
     
-    // Add users to each other's connections
-    await User.findByIdAndUpdate(req.user._id, {
-      $push: { connections: req.params.userId },
-      $pull: { pendingConnections: req.params.userId }
-    });
+    const currentUser = await User.findById(req.user._id);
     
-    await User.findByIdAndUpdate(req.params.userId, {
-      $push: { connections: req.user._id }
-    });
+    // Check if the request exists
+    if (!currentUser.pendingConnections.includes(userId)) {
+      return res.status(400).json({ message: 'No pending request from this user' });
+    }
     
-    res.status(200).json({ message: 'Connection accepted' });
+    // Remove from pending connections
+    currentUser.pendingConnections = currentUser.pendingConnections.filter(
+      id => id.toString() !== userId
+    );
+    
+    if (action === 'accept') {
+      // Add to connections
+      currentUser.connections.push(userId);
+      
+      // Update the other user's connections too
+      const otherUser = await User.findById(userId);
+      otherUser.connections.push(req.user._id);
+      await otherUser.save();
+    }
+    
+    await currentUser.save();
+    
+    res.json({ 
+      message: action === 'accept' ? 'Connection accepted' : 'Connection rejected',
+      action
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get all connections
-router.get('/connections', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id)
-      .populate('connections', '_id username name roleDescription')
-      .populate('pendingConnections', '_id username name roleDescription');
-    
-    res.status(200).json({
-      connections: user.connections,
-      pendingConnections: user.pendingConnections
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
+router.get("/all", protect, async(req, res) => {
+  const user = await User.find({}).select('_id username name uniqueCode roleDescription createdAt');;
+
+  res.json({
+    users : user
+  })
 });
 
 // Get user public profile by ID

@@ -27,6 +27,35 @@ const UserSchema = new mongoose.Schema({
     required: true,
     max: 50
   },
+  userType: {
+    type: String,
+    enum: ['service_provider', 'service_seeker'],
+    required: true
+  },
+  location: {
+    type: String,
+    max: 100
+  },
+  typeOfService: {
+    type: String,
+    max: 100
+  },
+  workExperience: {
+    type: String,
+    max: 500
+  },
+  yearsOfExperience: {
+    type: Number,
+    min: 0
+  },
+  specializedSkills: {
+    type: String,
+    max: 300
+  },
+  shortBio: {
+    type: String,
+    max: 500
+  },
   roleDescription: {
     type: String,
     max: 500
@@ -78,6 +107,9 @@ UserSchema.methods.matchPassword = async function(enteredPassword) {
 
 // Add an index for faster lookups
 UserSchema.index({ uniqueCode: 1 });
+UserSchema.index({ userType: 1 });
+UserSchema.index({ typeOfService: 1 });
+UserSchema.index({ location: 1 });
 
 const User = mongoose.model('User', UserSchema);
 

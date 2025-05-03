@@ -14,7 +14,20 @@ const generateToken = (id) => {
 // @access  Public
 export const registerUser = async (req, res) => {
   try {
-    const { username, password, name, roleDescription, email } = req.body;
+    const { 
+      username, 
+      password, 
+      name, 
+      roleDescription, 
+      email,
+      userType,
+      location,
+      typeOfService,
+      workExperience,
+      yearsOfExperience,
+      specializedSkills,
+      shortBio
+    } = req.body;
 
     // Check if username already exists
     const existingUser = await User.findOne({ username });
@@ -33,14 +46,21 @@ export const registerUser = async (req, res) => {
     // Generate a unique code for the user
     const uniqueCode = await generateUniqueCode();
 
-    // Create new user
+    // Create new user with additional fields
     const newUser = new User({
       username,
       password,
       name,
       roleDescription,
       uniqueCode,
-      ...(email && { email }) // Only add email if it exists
+      userType: userType || 'service_seeker', // Default to service seeker if not specified
+      ...(email && { email }), // Only add email if it exists
+      ...(location && { location }),
+      ...(typeOfService && { typeOfService }),
+      ...(workExperience && { workExperience }),
+      ...(yearsOfExperience && { yearsOfExperience }),
+      ...(specializedSkills && { specializedSkills }),
+      ...(shortBio && { shortBio })
     });
 
     // Save user to database
@@ -51,6 +71,7 @@ export const registerUser = async (req, res) => {
       username: savedUser.username,
       name: savedUser.name,
       uniqueCode: savedUser.uniqueCode,
+      userType: savedUser.userType,
       message: 'User registered successfully'
     });
   } catch (err) {
@@ -89,6 +110,7 @@ export const loginUser = async (req, res) => {
       username: user.username,
       name: user.name,
       uniqueCode: user.uniqueCode,
+      userType: user.userType,
       token
     });
   } catch (err) {
@@ -111,6 +133,13 @@ export const getUserProfile = async (req, res) => {
         name: user.name,
         uniqueCode: user.uniqueCode,
         email: user.email,
+        userType: user.userType,
+        location: user.location,
+        typeOfService: user.typeOfService,
+        workExperience: user.workExperience,
+        yearsOfExperience: user.yearsOfExperience,
+        specializedSkills: user.specializedSkills,
+        shortBio: user.shortBio,
         roleDescription: user.roleDescription
       });
     } else {

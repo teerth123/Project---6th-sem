@@ -1,230 +1,335 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-import { AuthContext } from './AuthContext';
-import axios from 'axios';
+// context/SocketContext.js
+import React, { createContext, useState, useEffect, useContext } from 'react';
+import io from 'socket.io-client'; // <--- ADDITION: Import socket.io-client
+import axios from 'axios'; // Make sure axios is imported if used here
+import { AuthContext } from './AuthContext'; // <--- ADDITION: Import AuthContext
 
-export const SocketContext = createContext();
+const SocketContext = createContext();
 
-export const SocketProvider = ({ children }) => {
-  const { currentUser } = useContext(AuthContext);
+// --- ADDITION: SocketProvider component ---
+const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
-  const [onlineUsers, setOnlineUsers] = useState(new Map());
-  const [notifications, setNotifications] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
-  
-  // Initialize socket connection when user logs in
-  useEffect(() => {
-    let newSocket;
+  const [notifications, setNotifications] = useState([]);
+  // Add state for online users if you implement that feature based on 'userStatus'
+  // const [onlineUsers, setOnlineUsers] = useState({});
 
-    if (currentUser && currentUser.token) {
-      console.log('Initializing socket connection with user token');
+  // Get token from AuthContext to authenticate socket connection
+  const { currentUser, token } = useContext(AuthContext);
+
+  // Effect to handle socket connection/disconnection
+  useEffect(() => {
+    // Only attempt connection if we have a token and are not already connected
+    if (token && !socket && !isConnected) {
+      console.log('[SocketContext] Token found, attempting to connect...');
+
+      // Connect to backend socket server - Use your actual backend URL
+      // Try using the full URL without assuming port 5000
+      const socketURL = window.location.hostname === 'localhost' 
+        ? 'http://localhost:5000'
+        : window.location.origin;
       
-      // Connect to socket server
-      newSocket = io('/', {
+      console.log('[SocketContext] Connecting to socket server at:', socketURL);
+      
+      const newSocket = io(socketURL, { // <--- DYNAMIC URL
+        // Send token for authentication based on your backend io.use() middleware
         auth: {
-          token: currentUser.token
-        }
+          token: token
+        },
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
       });
 
-      // Set up event listeners
       newSocket.on('connect', () => {
-        console.log('Socket connected successfully with ID:', newSocket.id);
+        console.log('[SocketContext] Connected successfully! Socket ID:', newSocket.id);
+        setSocket(newSocket);
+        setIsConnected(true);
+        // If you have logic to fetch initial online users, do it here
+      });
+
+      newSocket.on('disconnect', (reason) => {
+        console.log('[SocketContext] Disconnected. Reason:', reason);
+        setSocket(null);
+        setIsConnected(false);
+        setIncomingCall(null); // Clear incoming call on disconnect
+        // Clear online users state if implemented
+        // setOnlineUsers({});
       });
 
       newSocket.on('connect_error', (err) => {
-        console.error('Socket connection error:', err.message);
-        console.error('Socket connection error details:', err);
+        console.error('[SocketContext] Connection Error:', err.message);
+        // Handle authentication errors specifically
+        if (err.message.includes('Authentication error')) {
+          console.error("Socket Authentication Failed. Token might be invalid or expired.");
+          // Optionally trigger logout or token refresh here
+        }
+        // Prevent potential infinite loops by not setting socket/isConnected
+        setSocket(null);
+        setIsConnected(false);
       });
 
-      // Handle user status updates
-      newSocket.on('userStatus', ({ userId, isOnline }) => {
-        console.log('User status update received:', { userId, isOnline });
-        setOnlineUsers(prev => {
-          const newMap = new Map(prev);
-          newMap.set(userId, isOnline);
-          return newMap;
+      // --- Central Listener for Incoming Calls ---
+      // Listen for the 'incomingCall' event emitted by the backend API
+      newSocket.on('incomingCall', (data) => {
+        console.log('[SocketContext] Incoming call received:', data);
+        // TODO: Potentially add logic here to check if user is already in a call
+        setIncomingCall(data);
+      });
+
+      // --- Message Notification Listener ---
+      newSocket.on('messageNotification', (data) => {
+        console.log('[SocketContext] Message notification received:', data);
+        // Add notification to state
+        setNotifications(prev => {
+          console.log('[SocketContext] Adding notification to state:', data);
+          return [...prev, data];
         });
       });
 
-      // Handle message notifications
-      newSocket.on('messageNotification', (data) => {
-        console.log('Message notification received:', data);
-        setNotifications(prev => [...prev, data]);
-      });
-      
-      // Handle incoming video calls
-      newSocket.on('incomingCall', (data) => {
-        console.log('Incoming call event received:', data);
-        setIncomingCall(data);
-      });
-      
-      // Handle call ended notification
-      newSocket.on('callEnded', ({ callId }) => {
-        console.log('Call ended event received for call ID:', callId);
-        // If this was our current incoming call, clear it
-        setIncomingCall(prev => 
-          prev && prev.callId === callId ? null : prev
-        );
+      // --- Message Update Listener ---
+      newSocket.on('messageUpdate', (data) => {
+        console.log('[SocketContext] Message update received:', data);
+        // This is for updating conversation lists in real-time
       });
 
-      // Save socket instance
-      setSocket(newSocket);
-      console.log('Socket instance saved to state');
-    } else {
-      console.log('Not initializing socket - user or token missing', { 
-        hasUser: !!currentUser, 
-        hasToken: !!(currentUser?.token) 
+      // --- New Message Listener (global) ---
+      newSocket.on('newMessage', (data) => {
+        console.log('[SocketContext] New message received globally:', data);
+        // This handles general message reception in all components that subscribe to socket events
       });
+
+      // --- Direct Message Listener ---
+      newSocket.on('directMessage', (data) => {
+        console.log('[SocketContext] Direct message received:', data);
+      });
+
+      // --- Direct New Message Listener ---
+      newSocket.on('directNewMessage', (data) => {
+        console.log('[SocketContext] Direct broadcast message received:', data);
+      });
+
+      // Debug events
+      newSocket.onAny((event, ...args) => {
+        console.log(`[SocketContext] Event '${event}' received:`, args);
+      });
+
+      // Debug response listener
+      newSocket.on('debugResponse', (data) => {
+        console.log('[SocketContext] Received debug response from server:', data);
+      });
+
+      // Handle server ping
+      newSocket.on('serverPing', (data) => {
+        console.log('[SocketContext] Received server ping:', data);
+        // Respond with pong
+        if (newSocket.connected) {
+          newSocket.emit('clientPong', { 
+            received: true, 
+            clientTimestamp: new Date(),
+            serverTimestamp: data.timestamp 
+          });
+        }
+      });
+
+      // --- Optional: Listener for User Status Updates ---
+      // Based on your backend emitUserStatus function
+      // newSocket.on('userStatus', ({ userId, isOnline }) => {
+      //   console.log(`[SocketContext] User status update: ${userId} is ${isOnline ? 'online' : 'offline'}`);
+      //   setOnlineUsers(prev => ({ ...prev, [userId]: isOnline }));
+      // });
+
+      // Note: Other listeners like 'callSignal', 'callResponse', 'callEnded', 'newMessage'
+      // can be attached here OR directly within the components that need them (like VideoCall.js)
+      // Your current structure where VideoCall.js listens for call-related events is fine.
+
+    } else if (!token && socket) {
+      // If token is removed (user logs out), disconnect the socket
+      console.log('[SocketContext] Token removed, disconnecting socket.');
+      socket.disconnect();
+      setSocket(null);
+      setIsConnected(false);
     }
 
-    // Cleanup on unmount or when user logs out
+    // Cleanup function: Disconnect socket when component unmounts or token changes
     return () => {
-      if (newSocket) {
-        console.log('Disconnecting socket on cleanup');
-        newSocket.disconnect();
+      if (socket) {
+        console.log('[SocketContext] Cleaning up: disconnecting socket.');
+        socket.disconnect();
+        setSocket(null);
+        setIsConnected(false);
       }
     };
-  }, [currentUser]);
+  // Rerun effect if the token changes (e.g., login/logout)
+  }, [token, socket, isConnected]); // Added socket & isConnected to deps to prevent reconnect attempts if already connected
 
-  // Join a conversation room
-  const joinConversation = (conversationId) => {
-    if (socket && conversationId) {
-      socket.emit('joinConversation', conversationId);
-    }
-  };
+  // --- Functions Provided by Context (Your Existing Functions) ---
 
-  // Leave a conversation room
-  const leaveConversation = (conversationId) => {
-    if (socket && conversationId) {
-      socket.emit('leaveConversation', conversationId);
-    }
-  };
-
-  // Send a message
-  const sendMessage = (conversationId, text) => {
-    if (socket && conversationId && text) {
-      socket.emit('sendMessage', { conversationId, text });
-    }
-  };
-
-  // Send typing status
-  const sendTypingStatus = (conversationId, isTyping) => {
-    if (socket && conversationId !== undefined) {
-      socket.emit('typing', { conversationId, isTyping });
-    }
-  };
-
-  // Remove a notification
-  const removeNotification = (conversationId) => {
-    setNotifications(prev => 
-      prev.filter(notification => notification.conversationId !== conversationId)
-    );
-  };
-
-  // Check if a user is online
-  const isUserOnline = (userId) => {
-    return onlineUsers.get(userId) || false;
-  };
-  
-  // Initiate a video call
   const initiateVideoCall = async (conversationId, recipientId) => {
-    if (!socket || !conversationId || !recipientId) {
-      console.error('Cannot initiate call: Missing required parameters', { 
-        hasSocket: !!socket, conversationId, recipientId 
+    // This uses axios to hit the backend API endpoint - THIS IS CORRECT
+    // No changes needed here as it triggers the backend API -> socket emit flow
+    if (!conversationId || !recipientId) {
+      console.error('Cannot initiate call: Missing required parameters', {
+        conversationId, recipientId
       });
       return null;
     }
-    
+
     try {
       console.log('Making API call to initiate video call:', {
         url: `/api/conversations/${conversationId}/call/initiate`,
         conversationId, recipientId
       });
-      
-      // Use axios instead of fetch for consistency with the rest of the app
+      // Assuming axios is globally configured or imported and setup with auth headers
       const response = await axios.post(`/api/conversations/${conversationId}/call/initiate`);
-      console.log('Video call initiated response:', response.data);
-      return response.data;
+      console.log('Video call initiated API response:', response.data);
+      // Backend already emits 'incomingCall', API response gives initiator the callId
+      return response.data; // Should contain { callId, recipient }
     } catch (error) {
-      console.error('Error initiating call:', error);
+      console.error('Error initiating call API:', error);
       if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
         console.error('Server response error data:', error.response.data);
         console.error('Server response status:', error.response.status);
       } else if (error.request) {
-        // The request was made but no response was received
         console.error('No response received:', error.request);
       } else {
-        // Something happened in setting up the request that triggered an Error
         console.error('Request setup error:', error.message);
       }
       return null;
     }
   };
-  
-  // Send call signal directly via socket
+
   const sendCallSignal = (callId, recipientId, signal) => {
-    if (!socket) {
-      console.error('Cannot send call signal: Socket not connected');
+    // This uses socket.emit - THIS IS CORRECT
+    if (!socket || !isConnected) { // Check connection status
+      console.error('Cannot send call signal: Socket not connected/ready');
       return false;
     }
-    
     console.log('Sending call signal via socket:', { callId, recipientId });
+    // Match backend event name 'callSignal'
     socket.emit('callSignal', { callId, recipientId, signal });
     return true;
   };
-  
-  // Send call response directly via socket
+
   const sendCallResponse = (callId, callerId, accepted) => {
-    if (!socket) {
-      console.error('Cannot send call response: Socket not connected');
+    // This uses socket.emit - THIS IS CORRECT
+    if (!socket || !isConnected) { // Check connection status
+      console.error('Cannot send call response: Socket not connected/ready');
       return false;
     }
-    
     console.log('Sending call response via socket:', { callId, callerId, accepted });
+    // Match backend event name 'callResponse'
     socket.emit('callResponse', { callId, callerId, accepted });
     return true;
   };
-  
-  // End call directly via socket
+
   const endCall = (callId, recipientId) => {
-    if (!socket) {
-      console.error('Cannot end call: Socket not connected');
+    // This uses socket.emit - THIS IS CORRECT
+    if (!socket || !isConnected) { // Check connection status
+      console.error('Cannot end call: Socket not connected/ready');
       return false;
     }
-    
     console.log('Sending end call via socket:', { callId, recipientId });
+    // Match backend event name 'endCall'
+    // Ensure recipientId is the ID of the OTHER user in the call
     socket.emit('endCall', { callId, recipientId });
     return true;
   };
-  
-  // Clear the current incoming call
+
   const clearIncomingCall = () => {
     setIncomingCall(null);
   };
 
-  return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        onlineUsers,
-        notifications,
-        incomingCall,
-        joinConversation,
-        leaveConversation,
-        sendMessage,
-        sendTypingStatus,
-        removeNotification,
-        isUserOnline,
-        initiateVideoCall,
-        sendCallSignal,
-        sendCallResponse,
-        endCall,
-        clearIncomingCall
-      }}
-    >
-      {children}
-    </SocketContext.Provider>
-  );
-}; 
+  // --- Add other context functions if needed ---
+  const joinConversation = (conversationId) => {
+    if (socket && isConnected && conversationId) {
+        console.log(`[SocketContext] Joining conversation room: ${conversationId}`);
+        socket.emit('joinConversation', conversationId);
+        return true;
+    }
+    console.warn(`[SocketContext] Failed to join conversation: Socket not connected`);
+    return false;
+  };
+
+  const leaveConversation = (conversationId) => {
+      if (socket && isConnected && conversationId) {
+          console.log(`[SocketContext] Leaving conversation room: ${conversationId}`);
+          socket.emit('leaveConversation', conversationId);
+          return true;
+      }
+      return false;
+  };
+
+  const sendMessage = (conversationId, text, fileUrl, type) => {
+    // Your backend API POST /messages already handles emitting the 'newMessage'
+    // But we also emit from the client for redundancy
+    if (socket && isConnected) {
+      console.log('[SocketContext] Emitting message via socket:', { 
+        conversationId, 
+        text, 
+        fileUrl: fileUrl ? `[${fileUrl.substring(0, 20)}...]` : undefined, 
+        type 
+      });
+      
+      socket.emit('sendMessage', { conversationId, text, fileUrl, type });
+      
+      // Emit a debug event to verify socket is working
+      socket.emit('debugEvent', { message: 'Testing socket connection' });
+      
+      return true;
+    }
+    
+    console.warn('[SocketContext] Cannot send message: Socket not connected');
+    return false;
+  };
+
+  const sendTypingStatus = (conversationId, isTyping) => {
+    if (socket && isConnected) {
+        // Match backend event name 'typing'
+        console.log(`[SocketContext] Sending typing status: ${isTyping} for conversation: ${conversationId}`);
+        socket.emit('typing', { conversationId, isTyping });
+        return true;
+    }
+    return false;
+  };
+
+  // Function to remove a notification from the list
+  const removeNotification = (conversationId) => {
+    console.log(`[SocketContext] Removing notifications for conversation: ${conversationId}`);
+    setNotifications(prev => prev.filter(note => note.conversationId !== conversationId));
+  };
+
+  // Example: Needs 'userStatus' listener enabled above and backend emitting it
+  const isUserOnline = (userId) => {
+      // return !!onlineUsers[userId];
+      console.warn("isUserOnline function requires userStatus listener and state management");
+      return false; // Placeholder
+  };
+
+  // --- Context Value ---
+  const value = {
+    socket, // Provide socket instance if needed by components directly (usually not)
+    isConnected,
+    incomingCall,
+    clearIncomingCall,
+    initiateVideoCall, // API call
+    sendCallSignal,     // Socket emit
+    sendCallResponse,   // Socket emit
+    endCall,            // Socket emit
+    // Other functions
+    joinConversation,
+    leaveConversation,
+    sendMessage,
+    sendTypingStatus,
+    isUserOnline,
+    notifications,
+    removeNotification
+  };
+
+  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
+};
+// --- END ADDITION ---
+
+// Export the context and provider
+export { SocketContext, SocketProvider }; // <-- MODIFIED EXPORT

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef, useContext, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
@@ -8,7 +8,7 @@ import VideoMessage from '../components/VideoMessage';
 
 const Conversation = () => {
   const { conversationId } = useParams();
-  const { currentUser } = useContext(AuthContext);
+  const { currentUser } = useContext(AuthContext) || {};
   const {
     socket,
     joinConversation,
@@ -19,7 +19,7 @@ const Conversation = () => {
     initiateVideoCall,
     incomingCall,
     clearIncomingCall
-  } = useContext(SocketContext);
+  } = useContext(SocketContext) || {};
   const navigate = useNavigate();
 
   const [conversation, setConversation] = useState(null);
@@ -34,50 +34,40 @@ const Conversation = () => {
   const [hasPendingRequest, setHasPendingRequest] = useState(false);
   const [pendingUserId, setPendingUserId] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
+
+  // --- NEW STATE FOR MEDIA VIEWER ---
+  const [modalMedia, setModalMedia] = useState(null); // Stores the message object to display in modal
+  // --- END NEW STATE ---
+
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const modalRef = useRef(null); // Ref for the modal background for closing on outside click
 
   // Fetch conversation and messages
   useEffect(() => {
     const fetchConversationAndMessages = async () => {
       try {
-        // Check if conversationId is a MongoDB ObjectId or a user ID
         const isObjectId = /^[0-9a-fA-F]{24}$/.test(conversationId);
-
         let conversationData;
 
         if (isObjectId) {
-          // Try to get existing conversation
           try {
-            // First try to get conversation details directly
             const conversationRes = await axios.get(`/api/conversations/${conversationId}`);
             conversationData = conversationRes.data;
           } catch (err) {
-            // If that fails, it might be a user ID, so try to start a conversation
             if (err.response?.status === 404) {
               const startRes = await axios.post(`/api/conversations/start/${conversationId}`);
-
-              // If we got a conversation object back, use it
               if (startRes.data._id) {
                 conversationData = startRes.data;
-              }
-              // If we got a request/pending status, show appropriate message and redirect after delay
-              else if (startRes.data.isRequested || startRes.data.isPending) {
+              } else if (startRes.data.isRequested || startRes.data.isPending) {
                 const message = startRes.data.message || 'Cannot start conversation yet';
                 setError(message);
-
-                // If connection request is pending from the other user, provide option to accept
                 if (startRes.data.isPending && startRes.data.pendingUserId) {
-                  // Set state to show accept button
                   setHasPendingRequest(true);
                   setPendingUserId(startRes.data.pendingUserId);
                 } else {
-                  // Set a timer to navigate back after showing the message
-                  setTimeout(() => {
-                    navigate('/conversations');
-                  }, 3000);
+                  setTimeout(() => { navigate('/conversations'); }, 3000);
                 }
-
                 setLoading(false);
                 return;
               }
@@ -92,63 +82,120 @@ const Conversation = () => {
         }
 
         setConversation(conversationData);
-
-        // Get messages for the conversation
         const messagesRes = await axios.get(`/api/conversations/${conversationData._id}/messages`);
         setMessages(messagesRes.data);
-
         setLoading(false);
       } catch (err) {
         console.error('Error fetching conversation:', err);
         setError('Failed to load conversation');
         setLoading(false);
-
-        // Navigate back to conversations list after showing error
-        setTimeout(() => {
-          navigate('/conversations');
-        }, 3000);
+        setTimeout(() => { navigate('/conversations'); }, 3000);
       }
     };
 
     fetchConversationAndMessages();
   }, [conversationId, navigate]);
 
+  // Manually trigger message fetch (for debugging)
+  const fetchAndUpdateMessages = useCallback(async () => {
+    try {
+      console.log('Manually fetching latest messages');
+      if (!conversation?._id) return;
+      
+      const messagesRes = await axios.get(`/api/conversations/${conversation._id}/messages`);
+      console.log('Fetched messages:', messagesRes.data);
+      setMessages(messagesRes.data);
+    } catch (err) {
+      console.error('Error fetching messages:', err);
+    }
+  }, [conversation]);
+
+  // Socket connection status debug
+  useEffect(() => {
+    if (socket) {
+      console.log('Socket in Conversation component:', {
+        id: socket.id,
+        connected: socket.connected
+      });
+      
+      // Debug socket event
+      socket.emit('debugEvent', { 
+        component: 'Conversation',
+        conversationId,
+        timestamp: new Date()
+      });
+    } else {
+      console.warn('No socket connection in Conversation component');
+    }
+  }, [socket, conversationId]);
+
   // Join conversation room when socket is ready
   useEffect(() => {
     if (socket && conversation?._id) {
-      // Join the conversation room
-      joinConversation(conversation._id);
+      console.log('Joining conversation room:', conversation._id);
+      const joinSuccess = joinConversation(conversation._id);
+      console.log('Join conversation success:', joinSuccess);
 
-      // Listen for new messages
-      socket.on('newMessage', (message) => {
-        setMessages(prev => [...prev, message]);
-      });
+      const handleNewMessage = (message) => {
+        console.log('New message received in conversation:', message);
+        // Check if the message is for the current conversation
+        if (message.conversationId === conversation._id) {
+          // Add message to state if it's not already there
+          setMessages(prev => {
+            // Check if message already exists
+            if (prev.some(m => m._id === message._id)) {
+              console.log('Message already exists in state, skipping');
+              return prev;
+            }
+            const newMessages = [...prev, message];
+            console.log('Updated messages:', newMessages);
+            return newMessages;
+          });
+        }
+      };
 
-      // Listen for typing status
-      socket.on('userTyping', ({ userId, username, isTyping }) => {
+      const handleUserTyping = ({ userId, username, isTyping }) => {
+        console.log('Typing status received:', { userId, username, isTyping });
         if (isTyping) {
           setTypingUser(username);
         } else {
           setTypingUser(null);
         }
-      });
+      };
 
-      // Clean up on unmount
+      console.log('Setting up socket event listeners');
+      socket.on('newMessage', handleNewMessage);
+      socket.on('userTyping', handleUserTyping);
+      socket.on('directMessage', handleDirectMessage);
+      socket.on('directNewMessage', handleDirectNewMessage);
+
+      // Periodically check if messages have been updated
+      const messageCheckInterval = setInterval(() => {
+        console.log('Scheduled message check');
+        fetchAndUpdateMessages();
+      }, 10000); // Check every 10 seconds
+
       return () => {
+        console.log('Leaving conversation room:', conversation._id);
         leaveConversation(conversation._id);
-        socket.off('newMessage');
-        socket.off('userTyping');
+        socket.off('newMessage', handleNewMessage);
+        socket.off('userTyping', handleUserTyping);
+        socket.off('directMessage', handleDirectMessage);
+        socket.off('directNewMessage', handleDirectNewMessage);
+        clearInterval(messageCheckInterval);
       };
     }
-  }, [socket, conversation, joinConversation, leaveConversation]);
+  }, [socket, conversation, joinConversation, leaveConversation, fetchAndUpdateMessages]);
+
+  // Debug message rendering
+  useEffect(() => {
+    console.log('Current messages in state:', messages);
+  }, [messages]);
 
   // Handle incoming calls
   useEffect(() => {
-    // Check if the incoming call is for this conversation
     if (incomingCall && conversation) {
       const otherUser = getOtherParticipant();
-
-      // Only show call UI if it's from the user we're chatting with
       if (incomingCall.caller._id === otherUser?._id) {
         setActiveCall({
           callId: incomingCall.callId,
@@ -161,6 +208,18 @@ const Conversation = () => {
     }
   }, [incomingCall, conversation]);
 
+  // --- NEW EFFECT FOR CLOSING MODAL ON ESCAPE KEY ---
+  useEffect(() => {
+    const handleEscapeKey = (event) => {
+      if (event.key === 'Escape' && modalMedia) {
+        setModalMedia(null);
+      }
+    };
+    document.addEventListener('keydown', handleEscapeKey);
+    return () => document.removeEventListener('keydown', handleEscapeKey);
+  }, [modalMedia]);
+  // --- END NEW EFFECT ---
+
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -169,7 +228,6 @@ const Conversation = () => {
   // Get the other participant in the conversation
   const getOtherParticipant = () => {
     if (!conversation) return null;
-
     return conversation.participants.find(
       p => p._id !== currentUser._id
     );
@@ -178,29 +236,24 @@ const Conversation = () => {
   // Format message timestamp
   const formatMessageTime = (timestamp) => {
     if (!timestamp) return '';
-
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   // Handle typing status
   const handleTyping = () => {
-    if (socket && conversation?._id) {
-      // Send typing status
-      sendTypingStatus(conversation._id, true);
+    if (!socket || !conversation?._id) return;
 
-      // Clear previous timeout
-      if (typingTimeout) {
-        clearTimeout(typingTimeout);
-      }
+    sendTypingStatus(conversation._id, true);
 
-      // Set new timeout to stop typing status after 2 seconds
-      const timeout = setTimeout(() => {
-        sendTypingStatus(conversation._id, false);
-      }, 2000);
-
-      setTypingTimeout(timeout);
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
     }
+
+    const timeout = setTimeout(() => {
+      sendTypingStatus(conversation._id, false);
+    }, 2000);
+    setTypingTimeout(timeout);
   };
 
   // Handle file selection
@@ -222,17 +275,21 @@ const Conversation = () => {
 
     setSending(true);
     setError('');
+    
+    // Generate a temporary message ID for tracking
+    const tempMessageId = `temp-${Date.now()}`;
+    console.log(`Creating message with temp ID: ${tempMessageId}`);
 
     try {
       let messageData = { text: newMessage };
-      let fileUrl;
-      let fileType;
+      let fileUrl = '';
+      let fileType = 'text';
 
       if (selectedFile) {
         const formData = new FormData();
         formData.append('file', selectedFile);
-        console.log('frontend here');
 
+        console.log('Uploading file:', selectedFile.name);
         const uploadRes = await axios.post('/api/upload', formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
@@ -241,31 +298,76 @@ const Conversation = () => {
 
         fileUrl = uploadRes.data.url;
         fileType = uploadRes.data.type;
-        messageData = { ...messageData, fileUrl, type: fileType };
+        messageData = { text: newMessage, fileUrl, type: fileType };
+        console.log('File uploaded successfully:', uploadRes.data);
+      } else {
+        messageData.type = 'text';
       }
 
-      // Send message via API
+      console.log('Sending message to server:', messageData);
+      
+      // Create a temporary message for optimistic UI update
+      const tempMessage = {
+        _id: tempMessageId,
+        conversationId: conversation._id,
+        sender: currentUser._id,
+        senderName: currentUser.name,
+        text: messageData.text,
+        type: messageData.type,
+        fileUrl: messageData.fileUrl,
+        createdAt: new Date(),
+        read: false,
+        temporary: true
+      };
+      
+      // Add the temporary message to the UI immediately
+      console.log('Adding temporary message to UI:', tempMessage);
+      setMessages(prev => [...prev, tempMessage]);
+      
+      // Send the message to the server via API
+      console.log(`Posting message to /api/conversations/${conversation._id}/messages`);
       const res = await axios.post(`/api/conversations/${conversation._id}/messages`, messageData);
+      const sentMessage = res.data;
+      console.log('Message saved on server with ID:', sentMessage._id);
 
-      // Add the new message to the list
-      setMessages([...messages, res.data]);
+      // Replace the temporary message with the real one from the server
+      setMessages(prev => 
+        prev.map(msg => 
+          msg._id === tempMessageId ? sentMessage : msg
+        )
+      );
 
-      // Also send via socket for real-time
-      socketSendMessage(conversation._id, newMessage, fileUrl, fileType);
+      // Also emit via socket for real-time updates to other clients
+      console.log('Emitting message via socket');
+      const socketSuccess = socketSendMessage(
+        conversation._id, 
+        sentMessage.text, 
+        sentMessage.fileUrl, 
+        sentMessage.type
+      );
+      console.log('Socket message emission success:', socketSuccess);
 
-      // Reset typing status
+      // Stop typing indicator
       sendTypingStatus(conversation._id, false);
 
-      // Clear input and selected file
+      // Reset form
       setNewMessage('');
       setSelectedFile(null);
       if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Reset file input
+        fileInputRef.current.value = '';
       }
       setSending(false);
+      
+      // Force scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      
     } catch (err) {
       console.error('Error sending message:', err);
-      setError('Failed to send message');
+      // Remove any temp message on error
+      setMessages(prev => prev.filter(msg => msg._id !== tempMessageId));
+      setError('Failed to send message: ' + (err.response?.data?.message || err.message));
       setSending(false);
     }
   };
@@ -276,21 +378,14 @@ const Conversation = () => {
 
     try {
       setLoading(true);
-
-      // Accept the connection request
       await axios.put(`/api/users/accept/${pendingUserId}`);
-
-      // Try to start the conversation again
       const startRes = await axios.post(`/api/conversations/start/${pendingUserId}`);
 
-      // If we got a conversation, redirect to it
       if (startRes.data._id) {
         navigate(`/conversations/${startRes.data._id}`);
       } else {
         setError('Failed to start conversation after accepting connection');
-        setTimeout(() => {
-          navigate('/conversations');
-        }, 2000);
+        setTimeout(() => { navigate('/conversations'); }, 2000);
       }
     } catch (err) {
       console.error('Error accepting connection:', err);
@@ -302,42 +397,23 @@ const Conversation = () => {
   // Handle initiating video call
   const handleStartVideoCall = async () => {
     try {
-      console.log('VIDEO CALL BUTTON CLICKED - START FUNCTION TRIGGERED');
-      console.log('Starting video call...');
-
       if (!conversation) {
         console.error('Cannot start call: No active conversation');
         setError('Cannot start call: No active conversation');
         return;
       }
-
       const otherUser = getOtherParticipant();
       if (!otherUser) {
         console.error('Cannot start call: No other user found in this conversation');
         setError('Cannot start call: No recipient found');
         return;
       }
-
-      // Check if other user is online
       if (typeof isUserOnline === 'function' && !isUserOnline(otherUser._id)) {
         console.error('Cannot start call: User is offline');
         setError('Cannot start call: User is offline');
         return;
       }
 
-      console.log('Calling user:', otherUser.name, 'with ID:', otherUser._id);
-      console.log('Using conversation ID:', conversation._id);
-
-      if (!conversation._id || !otherUser._id) {
-        console.error('Invalid IDs for call:', {
-          conversationId: conversation?._id,
-          recipientId: otherUser?._id
-        });
-        setError('Cannot start call: Invalid IDs');
-        return;
-      }
-
-      // Call the initiateVideoCall function from context
       console.log('Initiating video call with params:', {
         conversationId: conversation._id,
         recipientId: otherUser._id
@@ -345,10 +421,7 @@ const Conversation = () => {
 
       const callData = await initiateVideoCall(conversation._id, otherUser._id);
 
-      console.log('Call data received from API:', callData);
-
       if (callData && callData.callId) {
-        console.log('Setting up active call with ID:', callData.callId);
         setActiveCall({
           callId: callData.callId,
           recipientId: otherUser._id,
@@ -373,6 +446,48 @@ const Conversation = () => {
     clearIncomingCall();
   };
 
+  // --- NEW FUNCTION TO OPEN MEDIA MODAL ---
+  const openMediaModal = (message) => {
+      if (message.type === 'image' || message.type === 'video') {
+          setModalMedia(message);
+      }
+  };
+  // --- END NEW FUNCTION ---
+
+  const handleDirectMessage = (message) => {
+    console.log('Direct message received in conversation:', message);
+    if (message.conversationId === conversation?._id) {
+      // Add message to state if it's not already there
+      setMessages(prev => {
+        // Check if message already exists
+        if (prev.some(m => m._id === message._id)) {
+          console.log('Direct message already exists in state, skipping');
+          return prev;
+        }
+        const newMessages = [...prev, message];
+        console.log('Updated messages with direct message:', newMessages);
+        return newMessages;
+      });
+    }
+  };
+
+  const handleDirectNewMessage = (message) => {
+    console.log('Direct broadcast message received in conversation:', message);
+    if (message.conversationId === conversation?._id) {
+      // Add message to state if it's not already there
+      setMessages(prev => {
+        // Check if message already exists
+        if (prev.some(m => m._id === message._id)) {
+          console.log('Broadcast message already exists in state, skipping');
+          return prev;
+        }
+        const newMessages = [...prev, message];
+        console.log('Updated messages with broadcast message:', newMessages);
+        return newMessages;
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-screen">
@@ -381,7 +496,6 @@ const Conversation = () => {
     );
   }
 
-  // If we have a pending request that needs to be accepted
   if (hasPendingRequest && pendingUserId) {
     return (
       <div className="flex flex-col items-center justify-center h-screen p-4">
@@ -431,8 +545,53 @@ const Conversation = () => {
         />
       )}
 
+      {/* --- NEW MEDIA VIEWER MODAL --- */}
+      {modalMedia && (
+        <div
+          ref={modalRef}
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            if (modalRef.current === e.target) {
+              setModalMedia(null);
+            }
+          }}
+        >
+          <div className="relative max-w-full max-h-full bg-white rounded-lg overflow-hidden shadow-xl">
+            {/* Close Button */}
+            <button
+              onClick={() => setModalMedia(null)}
+              className="absolute top-2 right-2 bg-gray-800 text-white rounded-full p-1 z-10 opacity-75 hover:opacity-100"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            {/* Media Content */}
+            {modalMedia.type === 'image' && (
+              <img
+                src={modalMedia.fileUrl}
+                alt="Maximized Image"
+                className="block max-w-full max-h-screen object-contain"
+              />
+            )}
+            {modalMedia.type === 'video' && (
+              <video
+                src={modalMedia.fileUrl}
+                controls
+                className="block max-w-full max-h-screen object-contain"
+              >
+                Your browser does not support the video tag.
+              </video>
+            )}
+          </div>
+        </div>
+      )}
+      {/* --- END NEW MEDIA VIEWER MODAL --- */}
+
+
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center">
+      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center z-10">
         <Link to="/conversations" className="mr-4 text-gray-500 hover:text-gray-700">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -456,18 +615,29 @@ const Conversation = () => {
         </Link>
 
         <button
-          onClick={handleStartVideoCall}
-          className="ml-auto bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        >
-          Start Video Call
-        </button>
+  onClick={() => {
+    const videoCallURL = 'https://2d66-2409-40c2-2010-b4c7-7197-2c9f-419c-1bb8.ngrok-free.app/index.html?roomID=myroom123';
+    window.open(videoCallURL, '_blank');
+  }}
+  className="ml-auto bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+>
+  Start Video Call
+</button>
+
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
         {messages.map((message) => (
           <div key={message._id} className={`flex ${message.sender === currentUser._id ? 'justify-end' : 'justify-start'} mb-4`}>
-            <div className={`rounded-lg p-2 ${message.sender === currentUser._id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
+            {/* --- WRAPPING DIV ADDED FOR CLICK HANDLING (CORRECTED CLASSNAME SYNTAX) --- */}
+            <div
+              // Corrected className: removed the extra closing curly brace after the backtick
+              className={`rounded-lg p-2 ${message.sender === currentUser._id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-900'}
+                         ${(message.type === 'image' || message.type === 'video') ? 'cursor-pointer' : ''}`}
+              onClick={(message.type === 'image' || message.type === 'video') ? () => openMediaModal(message) : undefined}
+            >
+              {/* EXISTING CODE WITHIN THE MESSAGE BUBBLE - UNCHANGED */}
               {message.type === 'text' && <p>{message.text}</p>}
               {message.type === 'image' && <img src={message.fileUrl} alt="Image" className="max-w-xs rounded-lg" />}
               {message.type === 'video' && (
@@ -489,13 +659,20 @@ const Conversation = () => {
               )}
               <div className="text-xs text-gray-500 mt-1">{formatMessageTime(message.createdAt)}</div>
             </div>
+            {/* --- END WRAPPING DIV --- */}
           </div>
         ))}
         <div ref={messagesEndRef}></div>
       </div>
 
       {/* Message Input */}
-      <div className="bg-white border-t border-gray-200 px-4 py-3">
+      <div className="bg-white border-t border-gray-200 px-4 py-3 z-10">
+        {typingUser && (
+          <div className="text-sm text-gray-500 mb-1">{typingUser} is typing...</div>
+        )}
+        {error && !hasPendingRequest && (
+           <div className="text-sm text-red-600 mb-2">{error}</div>
+        )}
         <form onSubmit={handleSendMessage} className="flex items-center space-x-3">
           <input
             type="text"
@@ -520,8 +697,8 @@ const Conversation = () => {
           />
           <button
             type="submit"
-            disabled={sending}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            disabled={sending || (!newMessage.trim() && !selectedFile)}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Send
           </button>
@@ -529,6 +706,9 @@ const Conversation = () => {
         {selectedFile && (
           <div className="mt-2 text-sm text-gray-600">
             Selected: {selectedFile.name}
+            <button onClick={() => setSelectedFile(null)} className="ml-2 text-red-500 hover:text-red-700">
+              Remove
+            </button>
           </div>
         )}
       </div>
